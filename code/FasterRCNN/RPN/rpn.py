@@ -4,14 +4,12 @@ import math
 import torch
 from torch.nn import Module
 from torchvision.ops import nms
-from  code.FasterRCNN.RPN.rpn_head import RPNHead
-from  code.FasterRCNN.RPN.anchor_generator import AnchorGenerator
+from rpn_head import RPNHead
+from anchor_generator import AnchorGenerator
+
 
 class RPN(Module):
-    def __init__(self,anchor_generator,rpn_head,
-                 pre_nmn_top_num,post_nms_top_num,
-                 fg_iou_thresh,bg_iou_thresh,
-                 nms_thresh):
+    def __init__(self, anchor_generator, rpn_head, pre_nmn_top_num, post_nms_top_num, fg_iou_thresh, bg_iou_thresh, nms_thresh):
         super(RPN, self).__init__()
         self.anchor_generator = anchor_generator
         self.rpn_head = rpn_head
@@ -26,9 +24,9 @@ class RPN(Module):
     def adjust_anchor_by_reg(self):
         return
 
-    def forward(self,images, feature_maps, targets=None):
+    def forward(self, images, feature_maps, targets=None):
         batch_size = images.size()[0]
-        image_height, image_width = images.size()[2: ]
+        image_height, image_width = images.size()[2:]
 
         # ** get all anchors ** #
         anchor_list = self.anchor_generator(images, feature_maps)
@@ -37,7 +35,6 @@ class RPN(Module):
         num_reg = 4
         num_cls = 1
         cls_list, reg_list = self.rpn_head(feature_maps)
-
 
         format_cls_list = []
         format_reg_list = []
@@ -72,10 +69,9 @@ class RPN(Module):
         dy = reg[:, 1::4]
         dw = reg[:, 2::4]
         dh = reg[:, 3::4]
-            # limit max value for exp.
+        # limit max value for exp.
         dw = torch.clamp(dw, max=math.log(1000. / 16))
         dh = torch.clamp(dh, max=math.log(1000. / 16))
-
 
         pre_x = center_x + dx * width
         pre_y = center_y + dy * height
@@ -87,24 +83,16 @@ class RPN(Module):
         max_x = pre_x + torch.tensor(0.5) * pre_w
         max_y = pre_y + torch.tensor(0.5) * pre_h
 
-        proposals = torch.cat([min_x,min_y,max_x,max_y],dim=1)
-        proposals = proposals.reshape(total_anchor_num,-1,4)
-        proposals = proposals.view(batch_size ,-1, 4)
+        proposals = torch.cat([min_x, min_y, max_x, max_y], dim=1)
+        proposals = proposals.reshape(total_anchor_num, -1, 4)
+        proposals = proposals.view(batch_size, -1, 4)
 
-        # *** filter proposals. *** #
-        anchor_num_list = [cls.size()[1] * cls.size()[2] * cls.size()[3] for cls in cls_list]
-
+        # *** select top score anchor *** #
         # detach from graph
         cls = cls.detach()
         cls = cls.reshape(batch_size, -1)
 
-        # make Mask
-        feature_mask = [torch.full((anchor_num,), i)
-                        for i, anchor_num in enumerate(anchor_num_list)]
-        feature_mask = torch.cat(feature_mask, dim=0)
-        feature_mask = feature_mask.reshape(1, -1).expand_as(cls)
-
-        # get pre mns proposals in different feature maps.
+        anchor_num_list = [cls.size()[1] * cls.size()[2] * cls.size()[3] for cls in cls_list]
         index_list = []
         offset = 0
         for anchor_score in torch.split(cls, anchor_num_list, dim=1):
@@ -119,38 +107,44 @@ class RPN(Module):
         cls = cls[batch_size - 1,  top_index]
         proposals = proposals[batch_size - 1, top_index]
 
-            # get proposals that do clip、remove small and NMS
+        # *** do NMS *** #
+        # make Mask - for NMS: make distance of different feature map anchor as far as possible.
+        feature_mask = [torch.full((anchor_num,), i) for i, anchor_num in enumerate(anchor_num_list)]
+        feature_mask = torch.cat(feature_mask, dim=0).reshape(1, -1)
+        feature_mask = feature_mask.expand_as(torch.randn(size=(batch_size, feature_mask.size()[1])))
+
         filter_proposals = []
         filter_scores = []
         for box, score, mask in zip(proposals, cls, feature_mask):
-            min_x = torch.clamp(box[:, 0], min=0, max=image_width)[:,None]
-            min_y = torch.clamp(box[:, 1], min=0, max=image_height)[:,None]
-            max_x = torch.clamp(box[:, 2], min=0, max=image_width)[:,None]
-            max_y = torch.clamp(box[:, 3], min=0, max=image_height)[:,None]
-            box = torch.cat([min_x,min_y,max_x,max_y], dim=1)
+            # clip box
+            min_x = torch.clamp(box[:, 0], min=0, max=image_width)[:, None]
+            min_y = torch.clamp(box[:, 1], min=0, max=image_height)[:, None]
+            max_x = torch.clamp(box[:, 2], min=0, max=image_width)[:, None]
+            max_y = torch.clamp(box[:, 3], min=0, max=image_height)[:, None]
+            box = torch.cat([min_x, min_y, max_x, max_y], dim=1)
             box_w = box[:, 2] - box[:, 0]
             box_h = box[:, 3] - box[:, 1]
-            keep = torch.logical_and(torch.ge(box_w, self.min_size),
-                                     torch.ge(box_h, self.min_size))
+            # remove small box
+            keep = torch.logical_and(torch.ge(box_w, self.min_size), torch.ge(box_h, self.min_size))
             keep = torch.where(keep)[0]
             box = box[keep]
             score = score[keep]
             mask = mask[keep]
+            # make distance of different feature map anchor as far as possible
             offset = mask.to(box) * (box.max() + 1)
-
             box_for_mns = box + offset[:, None]
-            keep = nms(box_for_mns,score, self.nms_thresh)[:self.post_nms_top_num]
+            # mns
+            keep = nms(box_for_mns, score, self.nms_thresh)[:self.post_nms_top_num]
 
             box, score = box[keep], score[keep]
             filter_proposals.append(box)
             filter_scores.append(score)
 
-
-        losses= {}
+        losses = {}
         if self.training:
             # *** get pos and neg data sample. *** #
             for anchor, target in zip(anchor_list, targets):
-                # get iou value that anchors for per ground truth.
+                # compute anchors iou value with per ground truth.
                 ground_truth = torch.tensor(target['box'])
                 anchor = anchor.view(-1, 4)
                 anchor_w = anchor[:, 2] - anchor[:, 0]
@@ -169,40 +163,41 @@ class RPN(Module):
                 iou = join_area / (anchor_area[:, None] + ground_truth_area - join_area)
 
                 max_iou, max_index = iou.max(dim=1)
-                neg_condition = torch.lt(max_iou,self.bg_iou_thresh)
-                pos_condition = torch.gt(max_iou,self.fg_iou_thresh)
-                mid_condition = torch.logical_and(torch.gt(max_iou,self.bg_iou_thresh),
-                                                  torch.lt(max_iou,self.fg_iou_thresh))
+                neg_condition = torch.lt(max_iou, self.bg_iou_thresh)
+                pos_condition = torch.gt(max_iou, self.fg_iou_thresh)
+                mid_condition = torch.logical_and(torch.gt(max_iou, self.bg_iou_thresh),
+                                                  torch.lt(max_iou, self.fg_iou_thresh))
                 max_iou[neg_condition] = 0
                 max_iou[pos_condition] = 1
                 max_iou[mid_condition] = -1
 
-                anchor_label = max_iou
-                anchor_match_gt = ground_truth[max_index]
+                label = max_iou
+                ground_truth = ground_truth[max_index]
+
                 break
         return filter_proposals, losses
 
 
-
 if __name__ == '__main__':
-    images = torch.randn(size=(2, 3, 281, 500))
-    feature_maps = [torch.randn(2, 3, 112, 112), torch.randn(2, 3, 64, 64)]
-    targets = [{'size': [3.0, 281, 500], 'class': ['dog'], 'box': [[104, 78, 375, 183],[133, 88, 197, 123]]}, {'size': [3.0, 500.0, 375.0], 'class': ['cat'], 'box': [[104, 78, 375, 183]]}]
-    in_channels = 3
-    num_anchors = 9
-    rpn_head = RPNHead(in_channels, num_anchors)
-    anchor_generator = AnchorGenerator()
+    input_images = torch.randn(size=(2, 3, 281, 500))
+    input_feature_maps = [torch.randn(2, 3, 112, 112), torch.randn(2, 3, 64, 64)]
+    input_targets = [{'size': [3.0, 281, 500], 'class': ['dog'], 'box': [[104, 78, 375, 183],[133, 88, 197, 123]]}, {'size': [3.0, 500.0, 375.0], 'class': ['cat'], 'box': [[104, 78, 375, 183]]}]
 
-    pre_nmn_top_num = 2000
-    post_nms_top_num = 2000
+    input_in_channels = 3
+    input_num_anchors = 9
+    input_rpn_head = RPNHead(input_in_channels, input_num_anchors)
+    input_anchor_generator = AnchorGenerator()
 
-    nms_thresh = 0.7
+    input_pre_nmn_top_num = 2000
+    input_post_nms_top_num = 2000
 
-    fg_iou_thresh = 0.7
-    bg_iou_thresh = 0.3
+    input_nms_thresh = 0.7
 
-    rpn = RPN(anchor_generator,rpn_head,
-              pre_nmn_top_num,post_nms_top_num,
-              nms_thresh,
-              fg_iou_thresh, bg_iou_thresh)
-    rpn(images,feature_maps,targets)
+    input_fg_iou_thresh = 0.7
+    input_bg_iou_thresh = 0.3
+
+    rpn = RPN(input_anchor_generator, input_rpn_head,
+              input_pre_nmn_top_num, input_post_nms_top_num,
+              input_nms_thresh, input_fg_iou_thresh,
+              input_bg_iou_thresh)
+    rpn(input_images, input_feature_maps, input_targets)

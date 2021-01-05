@@ -37,7 +37,6 @@ class AnchorGenerator(Module):
         self.base_anchor = torch.cat(base_anchors, dim=0)
         return
 
-
     def generate_anchor(self, feature_sizes, strides, device, data_type):
         # type (List[tuple],List[tuple],,) -> List[Tensor]
 
@@ -93,4 +92,4 @@ if __name__ == '__main__':
     images = torch.randn(size=(2, 3, 256, 256))
     feature_maps = [torch.randn(2, 3, 112, 112), torch.randn(2, 3, 64, 64)]
     anchor_generator = AnchorGenerator()
-    anchor_list = anchor_generator(images, feature_maps)
+    output_anchor_list = anchor_generator(images, feature_maps)

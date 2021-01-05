@@ -6,6 +6,7 @@ from torch.nn import Module
 from torch.nn import Conv2d
 from torch.nn import functional
 
+
 class RPNHead(Module):
     """
     class and regression anchor on feature maps.
@@ -46,14 +47,14 @@ class RPNHead(Module):
             convert_feature = functional.relu(self.cov(feature))
             cls_list.append(self.cls(convert_feature))
             reg_list.append(self.reg(convert_feature))
-        return cls_list,reg_list
+        return cls_list, reg_list
 
 
 if __name__ == '__main__':
-    feature_maps = [torch.randn(2, 3, 112, 112), torch.randn(2, 3, 64, 64)]
-    in_channels = 3
-    num_anchors = 9
-    rpn_head = RPNHead(in_channels, num_anchors)
-    cls_list, reg_list = rpn_head(feature_maps)
-    print(cls_list[0].size())
-    print(reg_list[0].size())
+    input_feature_maps = [torch.randn(2, 3, 112, 112), torch.randn(2, 3, 64, 64)]
+    input_in_channels = 3
+    input_num_anchors = 9
+    input_rpn_head = RPNHead(input_in_channels, input_num_anchors)
+    output_cls_list, output_reg_list = input_rpn_head(input_feature_maps)
+    print(output_cls_list[0].size())
+    print(output_reg_list[0].size())
