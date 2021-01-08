@@ -9,7 +9,8 @@ from anchor_generator import AnchorGenerator
 
 
 class RPN(Module):
-    def __init__(self, anchor_generator, rpn_head, pre_nmn_top_num, post_nms_top_num, fg_iou_thresh, bg_iou_thresh, nms_thresh):
+    def __init__(self, anchor_generator, rpn_head, pre_nmn_top_num, post_nms_top_num, fg_iou_thresh, bg_iou_thresh, nms_thresh,
+                 sample_num, positive_fraction):
         super(RPN, self).__init__()
         self.anchor_generator = anchor_generator
         self.rpn_head = rpn_head
@@ -18,6 +19,8 @@ class RPN(Module):
         self.nms_thresh = nms_thresh
         self.fg_iou_thresh = fg_iou_thresh
         self.bg_iou_thresh = bg_iou_thresh
+        self.sample_num = sample_num
+        self.positive_fraction = positive_fraction
         self.min_size = 1e-3
         return
 
@@ -142,7 +145,10 @@ class RPN(Module):
 
         losses = {}
         if self.training:
-            # *** get pos and neg data sample. *** #
+            # *** 1、get the best matched ground truth for every anchor *** #
+            # *** 2、classify anchor in (background,foreground,middle) *** #
+            classify_labels = []
+            matched_gts = []
             for anchor, target in zip(anchor_list, targets):
                 # compute anchors iou value with per ground truth.
                 ground_truth = torch.tensor(target['box'])
@@ -172,9 +178,48 @@ class RPN(Module):
                 max_iou[mid_condition] = -1
 
                 label = max_iou
-                ground_truth = ground_truth[max_index]
+                classify_labels.append(label)
+                matched_gt = ground_truth[max_index]
+                matched_gts.append(matched_gt)
+
+            # *** get regression labels by anchor and matched ground truth *** #
+            anchors = torch.cat(anchor_list, dim=0).view(-1, 4)
+            ground_truths = torch.cat(matched_gts, dim=0)
+
+            anchor_min_x = anchors[:,0][:,None]
+            anchor_min_y = anchors[:,1][:,None]
+            anchor_max_x = anchors[:,2][:,None]
+            anchor_max_y = anchors[:,3][:,None]
+            anchor_w = anchor_max_x - anchor_min_x
+            anchor_h = anchor_max_y - anchor_min_y
+            anchor_center_x = anchor_min_x + 0.5 * anchor_w
+            anchor_center_y = anchor_min_y + 0.5 * anchor_h
+
+
+            gt_min_x = ground_truths[:,0][:,None]
+            gt_min_y = ground_truths[:,1][:, None]
+            gt_max_x = ground_truths[:,2][:, None]
+            gt_max_y = ground_truths[:,3][:, None]
+            gt_w = gt_max_x - gt_min_x
+            gt_h = gt_max_y - gt_min_y
+            gt_center_x = gt_min_x + 0.5 * gt_w
+            gt_center_y = gt_min_y + 0.5 * gt_h
+
+            dx = (gt_center_x - anchor_center_x) / anchor_w
+            dy = (gt_center_y - anchor_center_y) / anchor_h
+            dw = torch.log(gt_w / anchor_w)
+            dh = torch.log(gt_h / anchor_h)
+            regression_labels = torch.cat([dx, dy, dw, dh],dim=1)
+
+            # *** compute regression loss and classify loss *** #
+            for class_label in classify_labels:
+                pos = torch.where(torch.eq(class_label, 1))[0]
+                neg = torch.where(torch.eq(class_label, 0))[0]
+                num_pos = min(pos.numel(), self.sample_num * self.positive_fraction)
+                num_neg = min(neg.numel(), self.sample_num - num_pos)
 
                 break
+
         return filter_proposals, losses
 
 
@@ -196,8 +241,12 @@ if __name__ == '__main__':
     input_fg_iou_thresh = 0.7
     input_bg_iou_thresh = 0.3
 
+    input_sample_num = 256
+    input_positive_fraction = 0.5
+
     rpn = RPN(input_anchor_generator, input_rpn_head,
               input_pre_nmn_top_num, input_post_nms_top_num,
               input_nms_thresh, input_fg_iou_thresh,
-              input_bg_iou_thresh)
+              input_bg_iou_thresh, input_sample_num,
+              input_positive_fraction)
     rpn(input_images, input_feature_maps, input_targets)
