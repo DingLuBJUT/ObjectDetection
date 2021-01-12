@@ -18,13 +18,13 @@ class AnchorGenerator(Module):
         self.base_anchor = None
         return
 
-    def get_base_anchor(self, device, data_type):
+    def get_base_anchor(self, data_device, data_type):
         # get base anchor
         if self.base_anchor is not None:
             return
 
-        anchor_sizes = torch.tensor(self.anchor_sizes,device=device,dtype=data_type)
-        anchor_ratios = torch.tensor(self.anchor_ratios,device=device,dtype=data_type)
+        anchor_sizes = torch.tensor(self.anchor_sizes, device=data_device, dtype=data_type)
+        anchor_ratios = torch.tensor(self.anchor_ratios, device=data_device, dtype=data_type)
 
         base_anchors = []
         for size, ratio in zip(torch.tensor(anchor_sizes), torch.tensor(anchor_ratios)):
@@ -65,17 +65,17 @@ class AnchorGenerator(Module):
         feature_sizes = [feature_map.size()[2:] for feature_map in feature_maps]
 
         # get feature map device and data type
-        device, data_type = feature_maps[0].device, feature_maps[0].dtype
+        data_device, data_type = feature_maps[0].device, feature_maps[0].dtype
 
         # get stride in every feature map
-        strides = [(torch.as_tensor(image_size[0]/size[0], device=device, dtype=data_type),
-                    torch.as_tensor(image_size[1]/size[1], device=device, dtype=data_type)) for size in feature_sizes]
+        strides = [(torch.as_tensor(image_size[0]/size[0], device=data_device, dtype=data_type),
+                    torch.as_tensor(image_size[1]/size[1], device=data_device, dtype=data_type)) for size in feature_sizes]
 
         # get base anchor
-        self.get_base_anchor(device, data_type)
+        self.get_base_anchor(data_device, data_type)
 
         # generate anchors that mapping image size for different feature map and
-        anchor_list_over_features = self.generate_anchor(feature_sizes, strides, device, data_type)
+        anchor_list_over_features = self.generate_anchor(feature_sizes, strides, data_device, data_type)
 
         # generate anchors for every image
         anchor_list = []

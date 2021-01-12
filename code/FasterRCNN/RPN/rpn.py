@@ -59,9 +59,9 @@ class RPN(Module):
         reg = torch.cat(format_reg_list, dim=1).reshape(-1, num_reg)
 
         # *** apply regression on anchors. *** #
-        total_anchor_num = sum([anchor.size()[0] for anchor in anchor_list])
+        anchor_position_num = sum([anchor.size()[0] for anchor in anchor_list])
         total_anchor = torch.cat(anchor_list, dim=0)
-        reg = reg.reshape(total_anchor_num, -1)
+        reg = reg.reshape(anchor_position_num, -1)
 
         width = total_anchor[:, :, 2] - total_anchor[:, :, 0]
         height = total_anchor[:, :, 3] - total_anchor[:, :, 1]
@@ -75,7 +75,6 @@ class RPN(Module):
         # limit max value for exp.
         dw = torch.clamp(dw, max=math.log(1000. / 16))
         dh = torch.clamp(dh, max=math.log(1000. / 16))
-
         pre_x = center_x + dx * width
         pre_y = center_y + dy * height
         pre_w = torch.exp(dw) * width
@@ -87,7 +86,7 @@ class RPN(Module):
         max_y = pre_y + torch.tensor(0.5) * pre_h
 
         proposals = torch.cat([min_x, min_y, max_x, max_y], dim=1)
-        proposals = proposals.reshape(total_anchor_num, -1, 4)
+        proposals = proposals.reshape(anchor_position_num, -1, 4)
         proposals = proposals.view(batch_size, -1, 4)
 
         # *** select top score anchor *** #
@@ -147,8 +146,8 @@ class RPN(Module):
         if self.training:
             # *** 1、get the best matched ground truth for every anchor *** #
             # *** 2、classify anchor in (background,foreground,middle) *** #
-            classify_labels = []
-            matched_gts = []
+            anchor_label_list = []
+            ground_truth_list = []
             for anchor, target in zip(anchor_list, targets):
                 # compute anchors iou value with per ground truth.
                 ground_truth = torch.tensor(target['box'])
@@ -160,7 +159,6 @@ class RPN(Module):
                 ground_truth_w = ground_truth[:, 2] - ground_truth[:, 0]
                 ground_truth_h = ground_truth[:, 3] - ground_truth[:, 1]
                 ground_truth_area = ground_truth_w * ground_truth_h
-
                 # get left top point and right bottom point.
                 left_top = torch.max(anchor[:, None, :2], ground_truth[:, :2])
                 right_bottom = torch.min(anchor[:, None, 2:], ground_truth[:, 2:])
@@ -169,22 +167,22 @@ class RPN(Module):
                 iou = join_area / (anchor_area[:, None] + ground_truth_area - join_area)
 
                 max_iou, max_index = iou.max(dim=1)
-                neg_condition = torch.lt(max_iou, self.bg_iou_thresh)
-                pos_condition = torch.gt(max_iou, self.fg_iou_thresh)
-                mid_condition = torch.logical_and(torch.gt(max_iou, self.bg_iou_thresh),
+                neg_position = torch.lt(max_iou, self.bg_iou_thresh)
+                pos_position = torch.gt(max_iou, self.fg_iou_thresh)
+                mid_position = torch.logical_and(torch.gt(max_iou, self.bg_iou_thresh),
                                                   torch.lt(max_iou, self.fg_iou_thresh))
-                max_iou[neg_condition] = 0
-                max_iou[pos_condition] = 1
-                max_iou[mid_condition] = -1
+                max_iou[neg_position] = 0
+                max_iou[pos_position] = 1
+                max_iou[mid_position] = -1
 
                 label = max_iou
-                classify_labels.append(label)
-                matched_gt = ground_truth[max_index]
-                matched_gts.append(matched_gt)
+                anchor_label_list.append(label)
+                ground_truth_list.append(ground_truth[max_index])
 
             # *** get regression labels by anchor and matched ground truth *** #
             anchors = torch.cat(anchor_list, dim=0).view(-1, 4)
-            ground_truths = torch.cat(matched_gts, dim=0)
+            labels = torch.cat(anchor_label_list, dim=0)
+            ground_truths = torch.cat(ground_truth_list, dim=0)
 
             anchor_min_x = anchors[:,0][:,None]
             anchor_min_y = anchors[:,1][:,None]
@@ -194,7 +192,6 @@ class RPN(Module):
             anchor_h = anchor_max_y - anchor_min_y
             anchor_center_x = anchor_min_x + 0.5 * anchor_w
             anchor_center_y = anchor_min_y + 0.5 * anchor_h
-
 
             gt_min_x = ground_truths[:,0][:,None]
             gt_min_y = ground_truths[:,1][:, None]
@@ -209,17 +206,32 @@ class RPN(Module):
             dy = (gt_center_y - anchor_center_y) / anchor_h
             dw = torch.log(gt_w / anchor_w)
             dh = torch.log(gt_h / anchor_h)
-            regression_labels = torch.cat([dx, dy, dw, dh],dim=1)
+            regressions = torch.cat([dx, dy, dw, dh],dim=1)
 
             # *** compute regression loss and classify loss *** #
-            for class_label in classify_labels:
-                pos = torch.where(torch.eq(class_label, 1))[0]
-                neg = torch.where(torch.eq(class_label, 0))[0]
-                num_pos = min(pos.numel(), self.sample_num * self.positive_fraction)
-                num_neg = min(neg.numel(), self.sample_num - num_pos)
+            pos_idx = []
+            neg_idx = []
+            for anchor_label in anchor_label_list:
+                positive = torch.where(torch.eq(anchor_label, 1))[0]
+                negative = torch.where(torch.eq(anchor_label, 0))[0]
+                num_pos = int(min(positive.numel(), self.sample_num * self.positive_fraction))
+                num_neg = int(min(negative.numel(), self.sample_num - num_pos))
+                # random pos index and neg index
+                pos_idx_per_image = positive[torch.randperm(positive.numel())[:num_pos]]
+                neg_idx_per_image = negative[torch.randperm(negative.numel())[:num_neg]]
 
-                break
-
+                pos_idx_per_image_mask = torch.zeros_like(anchor_label, dtype=torch.uint8)
+                neg_idx_per_image_mask = torch.zeros_like(anchor_label, dtype=torch.uint8)
+                pos_idx_per_image_mask[pos_idx_per_image] = 1
+                neg_idx_per_image_mask[neg_idx_per_image] = 1
+                pos_idx.append(pos_idx_per_image_mask)
+                neg_idx.append(neg_idx_per_image_mask)
+            sampled_pos_inds = torch.where(torch.cat(pos_idx, dim=0))[0]
+            sampled_neg_inds = torch.where(torch.cat(neg_idx, dim=0))[0]
+            sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
+            labels = torch.cat(anchor_label_list, dim=0)
+            print(anchor_label_list[0].size(),anchor_label_list[1].size())
+            print(labels.size(),sampled_inds.size())
         return filter_proposals, losses
 
 

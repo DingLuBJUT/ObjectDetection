@@ -17,7 +17,7 @@ class RPNHead(Module):
     return:
 
     """
-    def __init__(self, in_channels, num_anchors):
+    def __init__(self, in_channels, num_pixel_anchors):
         super(RPNHead, self).__init__()
         self.cov = Conv2d(in_channels,
                           in_channels,
@@ -25,11 +25,11 @@ class RPNHead(Module):
                           stride=1,
                           padding=1)
         self.cls = Conv2d(in_channels,
-                          num_anchors,
+                          num_pixel_anchors,
                           kernel_size=1,
                           stride=1)
         self.reg = Conv2d(in_channels,
-                          num_anchors * 4,
+                          num_pixel_anchors * 4,
                           kernel_size=1,
                           stride=1)
 
