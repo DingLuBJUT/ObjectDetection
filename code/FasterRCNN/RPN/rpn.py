@@ -184,19 +184,19 @@ class RPN(Module):
             labels = torch.cat(anchor_label_list, dim=0)
             ground_truths = torch.cat(ground_truth_list, dim=0)
 
-            anchor_min_x = anchors[:,0][:,None]
-            anchor_min_y = anchors[:,1][:,None]
-            anchor_max_x = anchors[:,2][:,None]
-            anchor_max_y = anchors[:,3][:,None]
+            anchor_min_x = anchors[:, 0][:,None]
+            anchor_min_y = anchors[:, 1][:,None]
+            anchor_max_x = anchors[:, 2][:,None]
+            anchor_max_y = anchors[:, 3][:,None]
             anchor_w = anchor_max_x - anchor_min_x
             anchor_h = anchor_max_y - anchor_min_y
             anchor_center_x = anchor_min_x + 0.5 * anchor_w
             anchor_center_y = anchor_min_y + 0.5 * anchor_h
 
-            gt_min_x = ground_truths[:,0][:,None]
-            gt_min_y = ground_truths[:,1][:, None]
-            gt_max_x = ground_truths[:,2][:, None]
-            gt_max_y = ground_truths[:,3][:, None]
+            gt_min_x = ground_truths[:, 0][:,None]
+            gt_min_y = ground_truths[:, 1][:, None]
+            gt_max_x = ground_truths[:, 2][:, None]
+            gt_max_y = ground_truths[:, 3][:, None]
             gt_w = gt_max_x - gt_min_x
             gt_h = gt_max_y - gt_min_y
             gt_center_x = gt_min_x + 0.5 * gt_w
@@ -206,7 +206,7 @@ class RPN(Module):
             dy = (gt_center_y - anchor_center_y) / anchor_h
             dw = torch.log(gt_w / anchor_w)
             dh = torch.log(gt_h / anchor_h)
-            regressions = torch.cat([dx, dy, dw, dh],dim=1)
+            regressions = torch.cat([dx, dy, dw, dh], dim=1)
 
             # *** compute regression loss and classify loss *** #
             pos_idx = []
@@ -230,8 +230,8 @@ class RPN(Module):
             sampled_neg_inds = torch.where(torch.cat(neg_idx, dim=0))[0]
             sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
             labels = torch.cat(anchor_label_list, dim=0)
-            print(anchor_label_list[0].size(),anchor_label_list[1].size())
-            print(labels.size(),sampled_inds.size())
+            print(anchor_label_list[0].size(), anchor_label_list[1].size())
+            print(labels.size(), sampled_inds.size())
         return filter_proposals, losses
 
 
