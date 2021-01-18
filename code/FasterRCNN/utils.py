@@ -43,3 +43,8 @@ def draw_anchor_box(image, positions, object_name=None):
                 if cv2.waitKey(1) == 13:
                     break
     return
+
+
+def box_iou(box_1, box_2):
+
+    return
