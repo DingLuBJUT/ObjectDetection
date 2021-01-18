@@ -1,8 +1,11 @@
 # -*- coding:utf-8 -*-
 
+import os
 import cv2
-import numpy
+import json
+import numpy as np
 from numpy.random import randint
+import xml.etree.ElementTree as ET
 
 
 def draw_anchor_box(image, positions, object_name=None):
@@ -16,7 +19,7 @@ def draw_anchor_box(image, positions, object_name=None):
     Return:
 
     """
-    if not isinstance(image, numpy.ndarray) or not isinstance(positions[0], (list, tuple)):
+    if not isinstance(image, np.ndarray) or not isinstance(positions[0], (list, tuple)):
         return -1
 
     if object_name is None:
@@ -45,6 +48,55 @@ def draw_anchor_box(image, positions, object_name=None):
     return
 
 
-def box_iou(box_1, box_2):
+# def box_iou(box_1, box_2):
+#
+#     return
 
-    return
+
+def parse_xml(xml_dir, xml_name, dict_label=None, use_difficult=True):
+    """
+    parse image annotations xml file, return box、label and so on.
+
+    args:
+      xml_dir (str):
+      xml_name (str):
+      dict_label (dict):
+      use_difficult (bool):
+    return:
+        bbox (List[List[int]]): image ground truth position.
+        label (List[int]): image ground truth class.
+    """
+    annotations = ET.parse(os.path.join(xml_dir, xml_name + '.xml'))
+    bbox = list()
+    label = list()
+    difficult = list()
+    for obj in annotations.findall('object'):
+        if not use_difficult and int(obj.find('difficult').text) == 1:
+            continue
+        difficult.append(int(obj.find('difficult').text))
+        box = obj.find('bndbox')
+        bbox.append([int(box.find(tag).text) - 1 for tag in ('xmin', 'ymin', 'xmax', 'ymax')])
+        name = obj.find('name').text.lower().strip()
+        if dict_label is not None:
+            label.append(dict_label.get(name))
+    bbox = np.stack(bbox).astype(np.float32)
+    label = np.stack(label).astype(np.int32)
+    difficult = np.array(difficult, dtype=np.bool).astype(np.uint8)
+    return bbox, label, difficult
+
+
+if __name__ == '__main__':
+    json_class_path = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/ImageSets/Main/class.json"
+    dict_label = json.loads(open(json_class_path, 'r').read())
+    xml_dir = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/Annotations/"
+    xml_name = "2007_000033"
+    bbox, label, difficult = parse_xml(xml_dir, xml_name, dict_label)
+    print(bbox)
+    print(label)
+    # list_file_names = os.listdir("/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/ImageSets/Main/")
+    # dict_label = dict()
+    # set_labels = set()
+    # for name in list_file_names:
+    #     if name not in ['trainval.txt', 'val.txt', 'train.txt']:
+    #         label = name.split("_")[0]
+    #         set_labels.add(label)
