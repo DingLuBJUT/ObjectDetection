@@ -50,10 +50,9 @@ class ROIPooling(Module):
         return output
 
 
-
 if __name__ == '__main__':
-    list_feature_names = ['1','2']
-    output_size  = [7, 7]
+    list_feature_names = ['1', '2']
+    output_size = [7, 7]
     sampling_ratio = 2
     roi_pooling = ROIPooling(list_feature_names, output_size, sampling_ratio)
     dict_feature_maps = {
@@ -65,6 +64,6 @@ if __name__ == '__main__':
         torch.randint(low=0, high=256, size=(32, 4)).float()
     ]
     image_size = [(128, 128)]
-    output = roi_pooling(dict_feature_maps,list_proposals,image_size)
+    output = roi_pooling(dict_feature_maps, list_proposals, image_size)
     print(output.size())
 

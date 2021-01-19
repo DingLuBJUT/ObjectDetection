@@ -2,10 +2,11 @@
 
 import os
 import cv2
-import json
 import numpy as np
 from numpy.random import randint
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as et
+
+import torch
 
 
 def draw_anchor_box(image, positions, object_name=None):
@@ -47,6 +48,7 @@ def draw_anchor_box(image, positions, object_name=None):
                     break
     return
 
+
 def parse_xml(xml_dir, xml_name, dict_label=None, use_difficult=True):
     """
     parse image annotations xml file.
@@ -60,7 +62,7 @@ def parse_xml(xml_dir, xml_name, dict_label=None, use_difficult=True):
         bbox (List[List[int]]): image ground truth position.
         label (List[int]): image ground truth class.
     """
-    annotations = ET.parse(os.path.join(xml_dir, xml_name + '.xml'))
+    annotations = et.parse(os.path.join(xml_dir, xml_name + '.xml'))
     bbox = list()
     label = list()
     difficult = list()
@@ -79,6 +81,70 @@ def parse_xml(xml_dir, xml_name, dict_label=None, use_difficult=True):
     return bbox, label, difficult
 
 
-# todo
 def box_iou(box_1, box_2):
-    return
+    """
+    return iou values of per box_1 and per box_2.
+
+    args:
+        box_1 (Tenor (N, 4))
+        box_1 (Tenor (M, 4))
+    return:
+        N * M iou value matrix
+    """
+
+    num_box_1 = box_1.size(0)
+
+    box_1_w = box_1[:, 2] - box_1[:, 0]
+    box_1_h = box_1[:, 3] - box_1[:, 1]
+    box_1_area = (box_1_w * box_1_h)[:, None]
+
+    box_2_w = box_2[:, 2] - box_2[:, 0]
+    box_2_h = box_2[:, 3] - box_2[:, 1]
+    box_2_area = (box_2_w * box_2_h)[:, None]
+
+    left_top = torch.max(box_1[:, :2][:, None, :], box_2[:, :2])
+    right_bottom = torch.min(box_1[:, 2:][:, None, :], box_2[:, 2:])
+    join_w = (right_bottom[:, :, 0] - left_top[:, :, 0]).clamp(min=0)
+    join_h = (right_bottom[:, :, 1] - left_top[:, :, 1]).clamp(min=0)
+    join_area = join_w * join_h
+    iou = join_area / ((box_1_area[:, None, :] + box_2_area).view(num_box_1, -1) - join_area)
+    return iou
+
+
+# todo
+def box_deviation(box_1, box_2, weights=None):
+    """
+    return regression distance deviation of box_1 and box_2.
+    args:
+        box_1 (Tenor (N, 4)):
+        box_1 (Tenor (M, 4)):
+    return:
+        (N * M * 4) regression deviation matrix of box_1 and box_2.
+    """
+    num_box_1 = box_1.size(0)
+    weight_x = weights[0]
+    weight_y = weights[1]
+    weight_w = weights[2]
+    weight_h = weights[3]
+
+    width_1 = (box_1[:, 2] - box_1[:, 0])[:, None]
+    height_1 = (box_1[:, 3] - box_1[:, 1])[:, None]
+    center_x_1 = box_1[:, 0][:, None] + width_1 / 2
+    center_y_1 = box_1[:, 1][:, None] + height_1 / 2
+
+    width_2 = (box_2[:, 2] - box_2[:, 0])[:, None]
+    height_2 = (box_2[:, 3] - box_2[:, 1])[:, None]
+    center_x_2 = box_2[:, 0][:, None] + width_2 / 2
+    center_y_2 = box_2[:, 1][:, None] + height_2 / 2
+
+    deviation_x = weight_x * ((center_x_2 - center_x_1[:, None, :]).view(num_box_1, -1) / width_1)
+    deviation_y = weight_y * ((center_y_2 - center_y_1[:, None, :]).view(num_box_1, -1) / height_1)
+    deviation_w = weight_w * torch.log(width_2 / width_1[:, None, :]).view(num_box_1, -1)
+    deviation_h = weight_h * torch.log(height_2 / height_1[:, None, :]).view(num_box_1, -1)
+
+    deviations = torch.cat([deviation_x[:, :, None],
+                            deviation_y[:, :, None],
+                            deviation_w[:, :, None],
+                            deviation_h[:, :, None]], dim=2)
+    return deviations
+
