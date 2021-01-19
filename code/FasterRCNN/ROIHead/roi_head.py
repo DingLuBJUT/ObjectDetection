@@ -13,8 +13,8 @@ Description:
 
 import torch
 from torch.nn import Module
-from roi_pooling import ROIPooling
 from mlp_head import TwoMLPHead
+from roi_pooling import ROIPooling
 from predictor import FasterRCNNPredictor
 
 
@@ -33,12 +33,13 @@ class ROIHead(Module):
         # self.pos_fraction = params['pos_fraction']
         return
 
-    def _get_proposals_class_label(self,list_rpn_proposals, list_targets):
+    def _get_proposals_label(self,list_rpn_proposals, list_targets):
 
         for proposal, target in zip(list_rpn_proposals,list_targets):
-            label =  torch.tensor(target['class'])
-            ground_truth = torch.tensor(target['box'])
+            label =  torch.as_tensor(target['class'])
+            ground_truth = torch.as_tensor(target['box'])
             print(label.size(),ground_truth.size())
+
 
 
         return
@@ -47,7 +48,7 @@ class ROIHead(Module):
 
         return
 
-    def _get_proposals_regression_label(self):
+    def _get_proposals_regression(self):
 
         return
 

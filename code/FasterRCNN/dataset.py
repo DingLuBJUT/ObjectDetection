@@ -1,11 +1,10 @@
 # -*- coding:utf-8 -*-
 
 """
-create Dataset for voc 2012 data set
+voc 2012 Dataset
 
 Description:
-    create voc 2012 Dataset by extends torch.utils.data.Dataset, and pre_process
-    image by Composed different transforms for per image.
+    create voc 2012 Dataset by extends torch.utils.data.Dataset.
 """
 # **** modification history ***** #
 # 2021/01/18,by junlu Ding,create #
@@ -26,15 +25,18 @@ ROOT_PATH = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/"
 
 class VOCDataSet(Dataset):
     """
-    make voc2012 data to Dataset object for data batch loading, and return
-    transformed batch images and image box、class label.
-    args:
-      image_dir (str): jpeg images directory path in voc2012 data set.
-      annotation_dir (str): annotation xml directory path in voc2012 data set.
-      file_name_path (str):
-      class_json_path (str): object label mapping json data path in in voc2012 data set.
-      transforms : compose transform object.
+    implement voc2012 Dataset and pre_process images by different transforms.
 
+    args:
+        image_dir (str): jpeg images directory path.
+        annotation_dir (str): annotation xml directory path.
+        file_name_path (str): the file path of total data name.
+        class_json_path (str): object label json path.
+        transforms : Compose transforms.
+
+    return:
+        images (Tensor): batch images.
+        targets (dict): batch box、label.
     """
     def __init__(self, image_dir, annotation_dir, file_name_path, class_json_path, transforms=None):
         super(VOCDataSet, self).__init__()

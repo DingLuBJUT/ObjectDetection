@@ -47,15 +47,9 @@ def draw_anchor_box(image, positions, object_name=None):
                     break
     return
 
-
-# def box_iou(box_1, box_2):
-#
-#     return
-
-
 def parse_xml(xml_dir, xml_name, dict_label=None, use_difficult=True):
     """
-    parse image annotations xml file, return box、label and so on.
+    parse image annotations xml file.
 
     args:
       xml_dir (str):
@@ -85,18 +79,6 @@ def parse_xml(xml_dir, xml_name, dict_label=None, use_difficult=True):
     return bbox, label, difficult
 
 
-if __name__ == '__main__':
-    json_class_path = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/ImageSets/Main/class.json"
-    dict_label = json.loads(open(json_class_path, 'r').read())
-    xml_dir = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/Annotations/"
-    xml_name = "2007_000033"
-    bbox, label, difficult = parse_xml(xml_dir, xml_name, dict_label)
-    print(bbox)
-    print(label)
-    # list_file_names = os.listdir("/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/ImageSets/Main/")
-    # dict_label = dict()
-    # set_labels = set()
-    # for name in list_file_names:
-    #     if name not in ['trainval.txt', 'val.txt', 'train.txt']:
-    #         label = name.split("_")[0]
-    #         set_labels.add(label)
+# todo
+def box_iou(box_1, box_2):
+    return

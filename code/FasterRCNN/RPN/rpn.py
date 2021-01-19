@@ -145,7 +145,7 @@ class RPN(Module):
             image_h: image height.
             image_w: image width.
         return:
-            proposal with nms (*, 4)
+            list_nms_proposals: per images nms proposal.
         """
         list_nms_proposals = []
         cls = torch.cat([cls.view(batch_size, -1) for cls in list_top_cls], dim=1)
@@ -343,13 +343,12 @@ class RPN(Module):
 
     def forward(self, images, list_features, list_targets):
         """
-        RPN forward compute
         args:
             images: batch images.
             list_features: batch features list.
             list_targets: batch image targets.
         return:
-            proposals or (regression loss or classify loss).
+            proposals and loss.
         """
         batch_size, image_h, image_w = images.size()[0], images.size()[2], images.size()[3]
         list_anchors = self.anchor_generator(images,list_features)
@@ -367,7 +366,7 @@ class RPN(Module):
         list_top_proposals = self._get_top_proposals(list_regs, list_anchors, list_top_index, list_num_anchors)
 
         # nms for top proposal
-        list_nms_proposals = self._nms(list_top_cls, list_top_proposals, batch_size, list_num_pre_nms,image_h, image_w)
+        list_nms_proposals = self._nms(list_top_cls, list_top_proposals, batch_size, list_num_pre_nms, image_h, image_w)
 
         rpn_loss = None
         if self.training:
