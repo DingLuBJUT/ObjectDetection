@@ -1,9 +1,15 @@
 # -*- coding:utf-8 -*-
 
 """
-faster-rcnn roi head
+faster rcnn roi head module.
 
 Description:
+    this module input is proposals that rpn outputs, firstly resize images size
+    the same size by ROI Pooling, and than flatten it to classify and regression
+    mlp layer. secondly compute loss of class and regression by mlp outputs and
+    post_process detection result. finally map predicted bbox back to original
+    image.
+
 
 
 """
@@ -13,6 +19,8 @@ Description:
 
 import torch
 from torch.nn import Module
+import torch.nn.functional as F
+
 from mlp_head import TwoMLPHead
 from roi_pooling import ROIPooling
 from predictor import FasterRCNNPredictor
@@ -89,7 +97,7 @@ class ROIHead(Module):
             num_neg = int(self.num_sampling_per_image - num_pos)
 
             neg_index = torch.where(torch.eq(proposals_label, 0))[0]
-            pos_index = torch.where(torch.lt(proposals_label, 0))[0]
+            pos_index = torch.where(torch.gt(proposals_label, 0))[0]
 
             # shuffle index
             sampling_pos_index = pos_index[torch.randperm(pos_index.size(0))][:num_pos]
@@ -105,7 +113,23 @@ class ROIHead(Module):
             list_deviation.append(regression_deviation)
         return list_proposals, list_labels, list_deviation
 
-    def compute_loss(self):
+    def compute_loss(self, cls_score, reg_params, list_proposals_label, list_deviation):
+
+        num_proposals = cls_score.size(0)
+        labels = torch.cat(list_proposals_label,dim=0).long()
+        cls_loss = F.cross_entropy(cls_score,labels)
+        reg_params = reg_params.view(num_proposals, -1, 4)
+        print(list_proposals_label[0],list_proposals_label[1])
+        print(reg_params.size())
+        print([deviation.size() for deviation in list_deviation])
+        # for proposals_label, deviation in zip(list_proposals_label,list_deviation):
+        #     print(proposals_label)
+        #     pos_index = torch.where(torch.gt(proposals_label,0))[0]
+        #     deviation_index = (proposals_label[pos_index] - torch.as_tensor([1])).long()
+        #     print(deviation.size())
+        #     print(deviation_index)
+        #     deviation = deviation[pos_index, deviation_index]
+        #     print("*******")
 
         return
 
@@ -119,7 +143,8 @@ class ROIHead(Module):
         proposal_features = self.roi_pooling(dict_feature_map, list_proposals, image_size)
         mlp_features = self.mlp_head(proposal_features)
         cls_score, reg_params = self.predictor(mlp_features)
-        print(cls_score.size(), reg_params.size())
+        if self.training:
+            self.compute_loss(cls_score, reg_params, list_proposals_label, list_deviation)
         return
 
 
