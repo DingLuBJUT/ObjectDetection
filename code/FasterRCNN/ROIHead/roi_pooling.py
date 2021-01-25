@@ -1,10 +1,12 @@
 # -*- coding:utf-8 -*-
 
 """
-roi pooling of roi head
+roi pooling
 
 Description:
-   make proposals of different size to same size
+   perform roi pooling on proposals output by rpn, map
+   each proposals to a different feature map and adjust
+   the mapping result to a same size.
 """
 # **** modification history ****  #
 # ******************************  #
@@ -17,11 +19,20 @@ from torchvision.ops import MultiScaleRoIAlign
 
 class ROIPooling(Module):
     """
-    roi pooling module for roi head
-    args:
-        list_feature_names (List[str]): name list of feature map names.
+    input the feature maps dict and rpn output result list
+    into MultiScaleRoIAlign to perform roi pooling, and
+    return the same size to the mapping result of proposals
+    on feature maps.
+
+    Args:
+        list_feature_names (List[str]): name list of feature
+        map names.
+
         output_size (List[int,int]): output size of roi pooling.
-        sampling_ratio (int):
+        sampling_ratio (int) :
+    Return:
+        roi pooling output tensor the size is:
+        (proposals num, output size, output size)
 
     """
     def __init__(self,list_feature_names,output_size,sampling_ratio):
@@ -35,15 +46,7 @@ class ROIPooling(Module):
         return
 
     def forward(self,dict_feature_maps, list_proposals, image_size):
-        """
 
-        args:
-           dict_feature_maps (dict(Tensor)): backbone feature map dicts.
-           list_proposals (List[Tenor,..]): rpn proposal list.
-           image_size (List[(int,int)]): input image size, and image_h,image_w must be same.
-        return:
-            result (Tensor): roi pooling result.
-        """
         output = self.roi_pooling(dict_feature_maps,
                                   list_proposals,
                                   image_size)

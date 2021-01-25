@@ -1,5 +1,19 @@
 # -*- coding:utf-8 -*-
 
+"""
+Convolution processing feature maps.
+
+Description:
+    Two different convolution layers are used to process feature
+    maps separately, and the convolution result is used to determine
+    whether the box contains the target and the box position regression
+    adjustment.
+
+"""
+# **** modification history ****  #
+# ******************************  #
+# 2021/01/17,by Junlu Ding,create #
+
 import torch
 from torch.nn import init
 from torch.nn import Module
@@ -9,13 +23,19 @@ from torch.nn import functional
 
 class RPNHead(Module):
     """
-    class and regression anchor on feature maps.
+    Convolution processes the feature maps of different layers output by
+    the backbone, and the feature maps with 4 and 1 output channels are
+    used for box classification and position regression respectively.
 
-    args:
-        images,feature_maps
+    Args:
+        in_channels (int): feature maps channel nums.
+        num_pixel_anchors (int): base anchor nums.
+    Return:
+        class list (List[Tensor(b,9,w1,h1),Tensor(b,9,w2,h2)..]):
+        different feature maps convolution output result list.
 
-    return:
-
+        regression (List[Tensor(b,36,w1,h1),Tensor(b,36,w2,h2)..]):
+        different feature maps convolution output result list.
     """
     def __init__(self, in_channels, num_pixel_anchors):
         super(RPNHead, self).__init__()
@@ -40,7 +60,6 @@ class RPNHead(Module):
         return
 
     def forward(self, feature_maps):
-        # type List[Tensor] -> List[Tensor]
         cls_list = []
         reg_list = []
         for feature in feature_maps:

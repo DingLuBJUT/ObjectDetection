@@ -18,7 +18,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from utils import parse_xml
-from tranform import Transform
+from data_tranforms import Transform
 
 ROOT_PATH = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/"
 

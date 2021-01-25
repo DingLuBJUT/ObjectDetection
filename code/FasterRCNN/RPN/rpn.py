@@ -1,13 +1,14 @@
 # -*- coding:utf-8 -*-
 """
-Faster-RCNN RPN Module.
+Faster RCNN RPN Module.
 
 Description:
-    The faster-rcnn rpn will get anchors by AnchorGenerator and classify、regression
-    anchors by RPNHead, and than get proposals by adjust anchor by RPNHead regression
-    output, filter proposals by classify score before NMS, lastly return NMS result.
-    Finally if training, will random sample train data and compute anchor classify loss
-    and regression loss.
+    The faster rcnn rpn will get anchors by AnchorGenerator and
+    classify、regression anchors by RPNHead, and than get proposals
+    by adjust anchor by RPNHead regression output, filter proposals
+    by classify score before NMS, lastly return NMS result. Finally
+    if training, will random sample train data and compute anchor
+    classify loss and regression loss.
 """
 # ***** modification history *****
 # ********************************
@@ -370,10 +371,13 @@ class RPN(Module):
 
         rpn_loss = None
         if self.training:
+            # assign category labels to each anchor according to the iou value
             list_class_label, list_best_ground_truth = self._get_anchor_class_labels(list_anchors, list_targets)
+            # assign regression(dx,dy,dw,dh) to each anchor
             list_regression_label = self._get_anchor_regression_label(list_anchors, list_best_ground_truth)
+            # select pos,neg train sample data by fraction
             pos_index, neg_index = self._sample_data_index(list_class_label)
-            cls_loss = self.binary_cross_entropy_loss(pos_index, neg_index,list_cls, list_class_label)
+            cls_loss = self.binary_cross_entropy_loss(pos_index, neg_index, list_cls, list_class_label)
             reg_loss = self.smooth_l1_loss(pos_index, list_regs, list_regression_label, batch_size)
             rpn_loss = {
                 "cls_loss": cls_loss,
@@ -437,4 +441,4 @@ if __name__ == '__main__':
 
     rpn = RPN(params)
     list_nms_proposals, rpn_loss = rpn(input_images, input_feature_list, input_targets)
-    print([proposals for proposals in list_nms_proposals])
+    print([proposals.size() for proposals in list_nms_proposals])

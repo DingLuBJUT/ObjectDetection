@@ -1,28 +1,37 @@
 # -*- coding:utf-8 -*-
 
 """
-faster-rcnn predictor
+predict mlp layer outputs.
 
 Description:
-    get cls scores and regression params.
+    perform classification and regression prediction on the
+    output of mlp.
 
 """
 # **** modification history ****  #
 # ******************************  #
 # 2021/01/17,by Junlu Ding,create #
 
-import torch
 from torch.nn import Module
 from torch.nn import Linear
 
 
 class FasterRCNNPredictor(Module):
     """
-    predict proposals class scores and regression params.
+    input the results of mlp into two different fully connected
+    layers to calculate the classification result score and position
+    regression parameters.
 
-    args:
+    Args:
         representation_size (int): mlp output size.
-        num_class (int): detection class num.
+        num_class (int): object category Number.
+
+    Return:
+        object classification score and box regression
+        parameters. the outputs size is:
+
+        classification: (proposals num, category Number)
+        regression: (proposals num, category Number * 4)
 
     """
     def __init__(self, representation_size, num_class):
@@ -35,13 +44,6 @@ class FasterRCNNPredictor(Module):
         return
 
     def forward(self, x):
-        """
-        args:
-            x (Tensor): output of mlp.
-        return:
-            class score (Tenor):
-            regression param (Tenor):
-        """
         cls_score = self.layer_cls_score(x)
         reg_param = self.layer_reg_param(x)
         return cls_score, reg_param

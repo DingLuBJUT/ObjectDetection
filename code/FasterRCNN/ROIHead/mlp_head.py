@@ -1,10 +1,11 @@
 # -*- coding:utf-8 -*-
 
 """
-two mlp head of roi head
+MLP layer for roi pooling output.
 
 Description:
-   flatten output of roi pooling for faster-rcnn predict
+   process roi pooling output results and input to the fully
+   connected layer.
 """
 # **** modification history ****  #
 # ******************************  #
@@ -18,10 +19,16 @@ import torch.nn.functional as F
 
 class TwoMLPHead(Module):
     """
-    process roi pooling output by mlp layers.
-    args:
-        num_in_channels (int): proproslas channel nums
-        representation_size (int):
+    the roi pooing output to the result is flattened, and
+    then input to the two fully connected layers.
+
+    Args:
+        num_in_channels (int): feature map channel nums
+        representation_size (int): mlp layer output size.
+
+    Return:
+        mlp output tensor: the output size is (proposals num,
+        representation_size).
 
     """
     def __init__(self,num_in_channels,representation_size):

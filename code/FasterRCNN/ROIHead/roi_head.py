@@ -141,8 +141,11 @@ class ROIHead(Module):
                                                                                        list_targets)
 
         proposal_features = self.roi_pooling(dict_feature_map, list_proposals, image_size)
+        print(proposal_features.size())
         mlp_features = self.mlp_head(proposal_features)
+        print(mlp_features.size())
         cls_score, reg_params = self.predictor(mlp_features)
+        print(cls_score.size(),reg_params.size())
         if self.training:
             self.compute_loss(cls_score, reg_params, list_proposals_label, list_deviation)
         return
