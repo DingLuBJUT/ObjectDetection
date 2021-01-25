@@ -17,6 +17,7 @@ import torch
 from torch.nn import Module
 from torchvision.ops import MultiScaleRoIAlign
 
+
 class ROIPooling(Module):
     """
     input the feature maps dict and rpn output result list
@@ -35,7 +36,7 @@ class ROIPooling(Module):
         (proposals num, output size, output size)
 
     """
-    def __init__(self,list_feature_names,output_size,sampling_ratio):
+    def __init__(self, list_feature_names, output_size, sampling_ratio):
         super(ROIPooling, self).__init__()
         self.list_feature_names = list_feature_names
         self.output_size = output_size

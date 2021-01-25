@@ -1,15 +1,6 @@
 # -*- coding:utf-8 -*-
 
 """
-faster rcnn roi head module.
-
-Description:
-    this module input is proposals that rpn outputs, firstly resize images size
-    the same size by ROI Pooling, and than flatten it to classify and regression
-    mlp layer. secondly compute loss of class and regression by mlp outputs and
-    post_process detection result. finally map predicted bbox back to original
-    image.
-
 
 
 """
@@ -26,6 +17,7 @@ from roi_pooling import ROIPooling
 from predictor import FasterRCNNPredictor
 from utils import box_iou
 from utils import box_deviation
+from utils import smooth_l1_loss
 from RPN.rpn import rpn_test_data
 
 
@@ -85,7 +77,6 @@ class ROIHead(Module):
         return:
             proposals, label, regression deviation
         """
-
         list_proposals = []
         list_labels = []
         list_deviation = []
@@ -106,6 +97,7 @@ class ROIHead(Module):
             sampling_index = torch.cat([sampling_pos_index, sampling_neg_index])
             proposals = proposals[sampling_index]
             proposal_labels = proposals_label[sampling_index]
+
             regression_deviation = box_deviation(proposals, ground_truth, self.regression_weights)
 
             list_proposals.append(proposals)
@@ -113,27 +105,41 @@ class ROIHead(Module):
             list_deviation.append(regression_deviation)
         return list_proposals, list_labels, list_deviation
 
-    def compute_loss(self, cls_score, reg_params, list_proposals_label, list_deviation):
-
+    @staticmethod
+    def compute_loss(cls_score, reg_params, list_proposals_label, list_deviation):
         num_proposals = cls_score.size(0)
-        labels = torch.cat(list_proposals_label,dim=0).long()
-        cls_loss = F.cross_entropy(cls_score,labels)
-        reg_params = reg_params.view(num_proposals, -1, 4)
-        print(list_proposals_label[0],list_proposals_label[1])
-        print(reg_params.size())
-        print([deviation.size() for deviation in list_deviation])
-        # for proposals_label, deviation in zip(list_proposals_label,list_deviation):
-        #     print(proposals_label)
-        #     pos_index = torch.where(torch.gt(proposals_label,0))[0]
-        #     deviation_index = (proposals_label[pos_index] - torch.as_tensor([1])).long()
-        #     print(deviation.size())
-        #     print(deviation_index)
-        #     deviation = deviation[pos_index, deviation_index]
-        #     print("*******")
+        labels = torch.cat(list_proposals_label, dim=0).long()
+        cls_loss = F.cross_entropy(cls_score, labels)
 
+        deviations = torch.cat(list_deviation, dim=0)
+        reg_params = reg_params.view(num_proposals, -1, 4)
+
+        pos_index = torch.where(torch.gt(labels, 0))[0]
+        pos_label = labels[pos_index]
+        deviations = deviations[pos_index]
+        reg_params = reg_params[pos_index, pos_label]
+        reg_loss = smooth_l1_loss(reg_params, deviations, size_average=False) / labels.numel()
+        return cls_loss, reg_loss
+
+    def post_process(self, list_proposals, predict_cls, predict_reg):
+        """
+
+        Args:
+        Return:
+        """
+
+        print(predict_cls.size())
+        print(predict_reg.size())
+        print(F.softmax(predict_cls).size())
+        print(F.softmax(predict_cls))
         return
 
     def forward(self, dict_feature_map, list_proposals, list_targets, image_size):
+
+        self.train(mode=False)
+        list_proposals_label = None
+        list_deviation = None
+
         if self.training:
             list_proposals_label = self._get_proposals_label(list_proposals, list_targets)
             list_proposals, list_proposals_label, list_deviation = self._sampling_data(list_proposals_label,
@@ -141,32 +147,46 @@ class ROIHead(Module):
                                                                                        list_targets)
 
         proposal_features = self.roi_pooling(dict_feature_map, list_proposals, image_size)
-        print(proposal_features.size())
         mlp_features = self.mlp_head(proposal_features)
-        print(mlp_features.size())
-        cls_score, reg_params = self.predictor(mlp_features)
-        print(cls_score.size(),reg_params.size())
+        predict_cls, predict_reg = self.predictor(mlp_features)
+
+        result = {}
+        losses = {}
+
         if self.training:
-            self.compute_loss(cls_score, reg_params, list_proposals_label, list_deviation)
-        return
+            cls_loss, reg_loss = self.compute_loss(predict_cls, predict_reg,
+                                                   list_proposals_label, list_deviation)
+            losses = {
+                "cls_loss": cls_loss,
+                "reg_loss": reg_loss
+            }
+        else:
+            self.post_process(list_proposals, predict_cls, predict_reg)
+
+        return result, losses
 
 
 if __name__ == '__main__':
 
     rpn_proposals, targets, feature_maps, images = rpn_test_data()
+    # print([proposal.size() for proposal in rpn_proposals])
+    # print([feature_map.size() for feature_map in feature_maps])
+    # print("**************")
 
     params = dict()
-    params['roi_pooling'] = ROIPooling(['1', '2'], [7, 7], 2)
-    params['mlp_head'] = TwoMLPHead(images.size(1) * [7, 7][0] ** 2, 1024)
-    params['predictor'] = FasterRCNNPredictor(1024, 3)
+    roi_feature_names = ['1', '2']
+    roi_output_size = [7, 7]
+    roi_sampling_ratio = 2
+    params['roi_pooling'] = ROIPooling(roi_feature_names, roi_output_size, roi_sampling_ratio)
+    representation_size = 1024
+    num_in_pixels = images.size(1) * roi_output_size[0] * roi_output_size[1]
+    params['mlp_head'] = TwoMLPHead(num_in_pixels, representation_size)
+    params['predictor'] = FasterRCNNPredictor(representation_size, 3)
     params['pos_threshold'] = 0.2
     params['neg_threshold'] = 0.05
     params['num_sampling_per_image'] = 512
     params['pos_fraction'] = 0.25
     params['regression_weights'] = None
     roi_head = ROIHead(params)
+
     roi_head(dict(zip(['1', '2'], feature_maps)), rpn_proposals, targets, [(500, 500)])
-
-
-
-

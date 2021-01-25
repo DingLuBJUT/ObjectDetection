@@ -1,7 +1,9 @@
 # -*- coding:utf-8 -*-
 
+
 import os
 import cv2
+import math
 import numpy as np
 from numpy.random import randint
 import xml.etree.ElementTree as et
@@ -111,7 +113,6 @@ def box_iou(box_1, box_2):
     return iou
 
 
-# todo
 def box_deviation(box_1, box_2, weights=None):
     """
     return regression distance deviation of box_1 and box_2.
@@ -121,6 +122,10 @@ def box_deviation(box_1, box_2, weights=None):
     return:
         (N * M * 4) regression deviation matrix of box_1 and box_2.
     """
+
+    iou = box_iou(box_1, box_2)
+    _, max_index = torch.max(iou, dim=1)
+
     num_box_1 = box_1.size(0)
     weight_x = weights[0]
     weight_y = weights[1]
@@ -146,5 +151,77 @@ def box_deviation(box_1, box_2, weights=None):
                             deviation_y[:, :, None],
                             deviation_w[:, :, None],
                             deviation_h[:, :, None]], dim=2)
+
+    index_1 = torch.range(0, max_index.size(0) - 1).long()
+    index_2 = max_index.long()
+    deviations = deviations[index_1, index_2]
     return deviations
+
+
+def box_regression(box, regression_params):
+    """
+    shifting box by regression params.
+
+    Args:
+        box (Tensor(n, 4)): box to be shifted.
+        regression_params (Tensor(n, 4)): shifting params.
+    Return:
+        shifted box (Tensor(n, 4)).
+    """
+
+    regs = regression_params
+    dx, dy, dh, dw = regs[:, 0], regs[:, 1], regs[:, 2], regs[:, 3]
+    dw = torch.clamp(dw, max=math.log(1000. / 16))
+    dh = torch.clamp(dh, max=math.log(1000. / 16))
+
+    box_h = box[:, 3] - box[:, 1]
+    box_w = box[:, 2] - box[:, 0]
+    center_x = box_w / 2
+    center_y = box_h / 2
+
+    box_x = center_x + dx * box_w
+    box_y = center_y + dy * box_h
+    box_h = torch.exp(dh) * box_h
+    box_w = torch.exp(dw) * box_w
+
+    min_x = (box_x - box_w / 2)[:, None]
+    min_y = (box_y - box_h / 2)[:, None]
+    max_x = (box_x + box_w / 2)[:, None]
+    max_y = (box_y + box_h / 2)[:, None]
+    box = torch.cat([min_x, min_y, max_x, max_y], dim=1)
+    return box
+
+
+def remove_useless_box(box, score_thresh, size_thresh):
+
+    return
+
+
+def clip_box():
+
+    return
+
+
+def smooth_l1_loss(y_hat, y, beta=1./9, size_average=True):
+    """
+    compute smooth l1 loss:
+
+            0.5 * x^2 if |x| < 1
+        l1 =
+            |x| - 0.5 if x<-1 or x>1
+    Args:
+        y_hat (Tensor(n,4)): prediction proposal deviation.
+        y (Tensor(n,4)): deviations of proposal and ground truth.
+        beta (double): loss hyper parameter.
+        size_average (bool): if return mean loss.
+    Returns:
+        smooth l1 loss (tensor)
+    """
+
+    x = torch.abs(y_hat - y)
+    condition = torch.lt(x, beta)
+    loss = torch.where(condition, 0.5 * x ** 2 / beta, x - 0.5 * beta)
+    if size_average:
+        return loss.mean()
+    return loss.sum()
 

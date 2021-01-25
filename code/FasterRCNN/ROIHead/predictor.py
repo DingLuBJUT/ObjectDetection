@@ -39,11 +39,11 @@ class FasterRCNNPredictor(Module):
         self.representation_size = representation_size
         self.num_class = num_class
 
-        self.layer_cls_score = Linear(self.representation_size, self.num_class)
-        self.layer_reg_param = Linear(self.representation_size, self.num_class * 4)
+        self.layer_cls = Linear(self.representation_size, self.num_class)
+        self.layer_reg = Linear(self.representation_size, self.num_class * 4)
         return
 
     def forward(self, x):
-        cls_score = self.layer_cls_score(x)
-        reg_param = self.layer_reg_param(x)
-        return cls_score, reg_param
+        cls = self.layer_cls(x)
+        reg = self.layer_reg(x)
+        return cls, reg

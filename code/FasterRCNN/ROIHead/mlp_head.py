@@ -11,7 +11,6 @@ Description:
 # ******************************  #
 # 2021/01/17,by Junlu Ding,create #
 
-import torch
 from torch.nn import Module
 from torch.nn import Linear
 import torch.nn.functional as F
@@ -23,7 +22,7 @@ class TwoMLPHead(Module):
     then input to the two fully connected layers.
 
     Args:
-        num_in_channels (int): feature map channel nums
+        num_in_pixels (int): feature map pixel nums.
         representation_size (int): mlp layer output size.
 
     Return:
@@ -31,10 +30,10 @@ class TwoMLPHead(Module):
         representation_size).
 
     """
-    def __init__(self,num_in_channels,representation_size):
+    def __init__(self, num_in_pixels, representation_size):
         super(TwoMLPHead, self).__init__()
-        self.fc1 = Linear(num_in_channels,representation_size)
-        self.fc2 = Linear(representation_size,representation_size)
+        self.fc1 = Linear(num_in_pixels, representation_size)
+        self.fc2 = Linear(representation_size, representation_size)
         return
 
     def forward(self, x):
