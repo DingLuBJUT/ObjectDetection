@@ -59,14 +59,14 @@ class RPNHead(Module):
                 init.constant_(layer.bias, 0)
         return
 
-    def forward(self, feature_maps):
-        cls_list = []
-        reg_list = []
-        for feature in feature_maps:
+    def forward(self, list_features):
+        list_cls = []
+        list_regs = []
+        for feature in list_features:
             convert_feature = functional.relu(self.cov(feature))
-            cls_list.append(self.cls(convert_feature))
-            reg_list.append(self.reg(convert_feature))
-        return cls_list, reg_list
+            list_cls.append(self.cls(convert_feature))
+            list_regs.append(self.reg(convert_feature))
+        return list_cls, list_regs
 
 
 if __name__ == '__main__':
@@ -74,6 +74,6 @@ if __name__ == '__main__':
     input_in_channels = 3
     input_num_anchors = 9
     input_rpn_head = RPNHead(input_in_channels, input_num_anchors)
-    output_cls_list, output_reg_list = input_rpn_head(input_feature_maps)
-    print(output_cls_list[0].size())
-    print(output_reg_list[0].size())
+    list_cls, list_regs = input_rpn_head(input_feature_maps)
+    print([cls.size() for cls in list_cls])
+    print([reg.size() for reg in list_regs])

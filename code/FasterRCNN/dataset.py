@@ -6,21 +6,24 @@ voc 2012 Dataset
 Description:
     create voc 2012 Dataset by extends torch.utils.data.Dataset.
 """
-# **** modification history ***** #
-# 2021/01/18,by junlu Ding,create #
+# ***** modification history *****
+# ********************************
+# 2021/02/10, by junlu Ding, create
 
 import os
 import json
-import numpy as np
 from PIL import Image
-
-import torch
 from torch.utils.data import Dataset, DataLoader
 
 from utils import parse_xml
-from data_tranforms import Transform
+from tranforms import Compose
+from tranforms import ToTensor
+from tranforms import Normalize
+from tranforms import RandomHorizontalFlip
+from generalized_transform import GeneralizedTransform
 
-ROOT_PATH = "/Users/dingjunlu/PycharmProjects/ObjectDetection/data/VOC2012/"
+
+ROOT_PATH = "/Users/dinglu/Documents/code/ObjectDetection/data/voc_2012/"
 
 
 class VOCDataSet(Dataset):
@@ -57,28 +60,58 @@ class VOCDataSet(Dataset):
 
     def __getitem__(self, index):
         file_name = self.list_file_names[index]
-        numpy_image = np.array(Image.open(os.path.join(self.image_dir, file_name + ".jpg")))
-        image = self.transforms(numpy_image)
         boxes, labels, _ = parse_xml(self.annotation_dir, file_name, self.dict_class)
-        return image, {"box": boxes, "label": labels}
+        target = {"box": boxes, "label": labels}
+        image = Image.open(os.path.join(self.image_dir, file_name + ".jpg"))
+        image, target = self.transforms(image, target)
+        return image, target
 
 
 def collate_fn(batch_data):
+    """
+    convert the data structure returned by the DataSet.
+
+    Args:
+        batch_data (List[Tuple]) :
+
+    Return:
+        images (list)
+        targets (list)
+
+    Example:
+        batch_data: [(image_1,target_1),(image_1,target_1)]
+        images: (image_1,image_2)
+        targets: (target_1,target_2)
+    """
     images, targets = list(zip(*batch_data))
-    images = torch.cat([image[None, :] for image in images])
-    return images, targets
+    return list(images), list(targets)
 
 
 if __name__ == '__main__':
     image_dir = "JPEGImages/"
     annotation_dir = "Annotations/"
-    file_name_path = "ImageSets/Main/train.txt"
     class_json_path = "ImageSets/Main/class.json"
-    transforms = Transform()
-    data_set = VOCDataSet(image_dir, annotation_dir, file_name_path, class_json_path, transforms)
-    data_loader = DataLoader(data_set, batch_size=2, shuffle=True, collate_fn=collate_fn)
-    for batch_images, batch_targets in data_loader:
-        print(batch_images.size())
-        print(batch_targets)
-        break
+    train_path = "ImageSets/Main/train.txt"
+    image_mean = [0.485, 0.456, 0.406]
+    image_std = [0.229, 0.224, 0.225]
+    transforms = Compose([
+        ToTensor(),
+        RandomHorizontalFlip(prob=0.5),
+        Normalize(image_mean,image_std)
+    ])
+    data_set = VOCDataSet(image_dir,
+                          annotation_dir,
+                          train_path,
+                          class_json_path,
+                          transforms=transforms)
+    data_loader = DataLoader(data_set,
+                             batch_size=5,
+                             shuffle=True,
+                             collate_fn=collate_fn)
 
+    generalized_transform = GeneralizedTransform(min_size=800,max_size=1000)
+
+    for batch_images, batch_targets in data_loader:
+        images, targets = generalized_transform(batch_images, batch_targets)
+        print(images.size())
+        break

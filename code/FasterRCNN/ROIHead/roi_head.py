@@ -1,7 +1,20 @@
 # -*- coding:utf-8 -*-
 
 """
+faster r-cnn roi head module.
 
+Description:
+
+    if in training mode, tagging the class and regression label, and then randomly
+    sample each image proposals that output by rpn according to a proportion.and
+    then perform roi pooling and mlp on the sampled proposal to obtain class and
+    regression output, and finally the regression and classification loss are
+    computed by tagging label and class and regression output.
+
+    if in testing mode, firstly perform roi pooling and mlp similar to the training,
+    and than perform different filtering operations including softMax、assign label、
+    regression proposal、clip proposal、remove low score、small、label is '0' proposal、
+    nms proposal、select top nms result.
 
 """
 # **** modification history ****  #
@@ -10,15 +23,20 @@
 
 import torch
 from torch.nn import Module
+from torchvision.ops import nms
 import torch.nn.functional as F
 
 from mlp_head import TwoMLPHead
 from roi_pooling import ROIPooling
 from predictor import FasterRCNNPredictor
-from utils import box_iou
 from utils import box_deviation
 from utils import smooth_l1_loss
 from RPN.rpn import rpn_test_data
+from utils import tagging_box
+from utils import get_sampling_factor
+from utils import box_clip
+from utils import box_regression
+from utils import remove_small_box
 
 
 class ROIHead(Module):
@@ -29,164 +47,229 @@ class ROIHead(Module):
         self.predictor = params['predictor']
         self.pos_threshold = params['pos_threshold']
         self.neg_threshold = params['neg_threshold']
-        self.num_sampling_per_image = params['num_sampling_per_image']
+        self.num_sample = params['num_sample']
         self.pos_fraction = params['pos_fraction']
         self.regression_weights = params['regression_weights']
-        if params['regression_weights'] is None:
-            self.regression_weights = (10., 10., 5., 5.)
+        self.score_thresh = params['score_thresh']
+        self.proposal_min_size = params['proposal_min_size']
+        self.nms_threshold = params['nms_threshold']
+        self.num_post_nms = params['num_post_nms']
         return
 
-    def _get_proposals_label(self, list_proposals, list_targets):
+
+    def forward(self, list_rpn_proposals, list_features, batch_image_info, list_targets, list_image_size):
         """
-        labeled proposal by iou value of ground truth and proposal
-
-        args:
-           list_proposals_label (List[Tensor]): rpn output proposals of per images.
-           list_targets (List[Dict]): ground truth、label of per image.
-        return:
-            a list of proposal label
-        """
-        list_proposals_label = []
-        for proposal, target in zip(list_proposals, list_targets):
-            # num_proposals = proposal.size(0)
-            label = torch.as_tensor(target['class'])
-            ground_truth = torch.as_tensor(target['box'])
-
-            iou = box_iou(proposal, ground_truth)
-            max_value, max_index = torch.max(iou, dim=1)
-
-            proposal_label = torch.zeros_like(max_value, dtype=torch.float)
-            pos_index = torch.where(torch.gt(max_value, self.pos_threshold))[0]
-            neg_index = torch.where(torch.lt(max_value, self.neg_threshold))[0]
-            discard_index = torch.where(torch.logical_and(torch.ge(max_value, self.neg_threshold),
-                                                          torch.le(max_value, self.pos_threshold)))[0]
-            proposal_label[discard_index] = -1
-            proposal_label[neg_index] = 0
-            proposal_label[pos_index] = label[max_index[pos_index]].float()
-            list_proposals_label.append(proposal_label)
-        return list_proposals_label
-
-    def _sampling_data(self, list_proposals_label, list_rpn_proposals, list_targets):
-        """
-        sampling data
-
-        args:
-            list_proposals_label (List(Tensor)): proposal label.
-            list_rpn_proposals (List[Tensor]): rpn output proposals of per images.
-            list_targets (List[Dict]): ground truth、label of per image.
-        return:
-            proposals, label, regression deviation
-        """
-        list_proposals = []
-        list_labels = []
-        list_deviation = []
-        for proposals_label, proposals, target in zip(list_proposals_label, list_rpn_proposals, list_targets):
-
-            ground_truth = torch.as_tensor(target['box'], dtype=torch.float)
-
-            num_pos = int(self.num_sampling_per_image * self.pos_fraction)
-            num_neg = int(self.num_sampling_per_image - num_pos)
-
-            neg_index = torch.where(torch.eq(proposals_label, 0))[0]
-            pos_index = torch.where(torch.gt(proposals_label, 0))[0]
-
-            # shuffle index
-            sampling_pos_index = pos_index[torch.randperm(pos_index.size(0))][:num_pos]
-            sampling_neg_index = neg_index[torch.randperm(neg_index.size(0))][:num_neg]
-
-            sampling_index = torch.cat([sampling_pos_index, sampling_neg_index])
-            proposals = proposals[sampling_index]
-            proposal_labels = proposals_label[sampling_index]
-
-            regression_deviation = box_deviation(proposals, ground_truth, self.regression_weights)
-
-            list_proposals.append(proposals)
-            list_labels.append(proposal_labels)
-            list_deviation.append(regression_deviation)
-        return list_proposals, list_labels, list_deviation
-
-    @staticmethod
-    def compute_loss(cls_score, reg_params, list_proposals_label, list_deviation):
-        num_proposals = cls_score.size(0)
-        labels = torch.cat(list_proposals_label, dim=0).long()
-        cls_loss = F.cross_entropy(cls_score, labels)
-
-        deviations = torch.cat(list_deviation, dim=0)
-        reg_params = reg_params.view(num_proposals, -1, 4)
-
-        pos_index = torch.where(torch.gt(labels, 0))[0]
-        pos_label = labels[pos_index]
-        deviations = deviations[pos_index]
-        reg_params = reg_params[pos_index, pos_label]
-        reg_loss = smooth_l1_loss(reg_params, deviations, size_average=False) / labels.numel()
-        return cls_loss, reg_loss
-
-    def post_process(self, list_proposals, predict_cls, predict_reg):
-        """
+        roi head inference.
 
         Args:
+            list_rpn_proposals（List[Tensor]): rpn output proposal for per image.
+
+            list_features (List[Tensor]): backbone different output feature for
+            batch image.
+
+            batch_image_info (Tuple): batch transformed image size info.
+
+            list_targets (List[Dict]): batch original image info including original
+            size、object class、ground truth.
+
+            list_image_size (List[Tuple]):
+
+        Example:
+            list_rpn_proposals: [(64, 4]), (35, 4)]
+            list_features: [(2, 3, 112, 112),(2, 3, 64, 64),(2, 3, 32, 32)]
+            batch_image_info: (2, 256, 256)
+            list_targets: [{'size':[3.0, 500.0, 375.0],'class':[2.0],'box':[[104, 78, 375, 183]]}]
+            list_image_size: [(267, 226),(289, 271)]
+
         Return:
+            roi head predict proposal、score、label.
+            roi head cls and reg train loss.
+
         """
 
-        print(predict_cls.size())
-        print(predict_reg.size())
-        print(F.softmax(predict_cls).size())
-        print(F.softmax(predict_cls))
-        return
-
-    def forward(self, dict_feature_map, list_proposals, list_targets, image_size):
-
         self.train(mode=False)
-        list_proposals_label = None
-        list_deviation = None
+        image_height = batch_image_info[1]
+        image_width = batch_image_info[2]
+        device, data_type = list_rpn_proposals[0].device, list_rpn_proposals[0].dtype
 
+        list_cls_label = []
+        list_reg_label = []
+        list_proposals = []
         if self.training:
-            list_proposals_label = self._get_proposals_label(list_proposals, list_targets)
-            list_proposals, list_proposals_label, list_deviation = self._sampling_data(list_proposals_label,
-                                                                                       list_proposals,
-                                                                                       list_targets)
+            for proposal, target in zip(list_rpn_proposals, list_targets):
+                labels = torch.as_tensor(target['class'],device=device)
+                ground_truth = torch.as_tensor(target['box'],device=device,
+                                               dtype=data_type)
+                # tagging cls label
+                cls_label = tagging_box(proposal,ground_truth,
+                                        self.neg_threshold,
+                                        self.pos_threshold,
+                                        labels)
+                # tagging reg label
+                reg_label = box_deviation(proposal, ground_truth,
+                                          self.regression_weights)
 
-        proposal_features = self.roi_pooling(dict_feature_map, list_proposals, image_size)
-        mlp_features = self.mlp_head(proposal_features)
+                # random sampling
+                pos_index = torch.where(torch.gt(cls_label, 0))[0]
+                neg_index = torch.where(torch.eq(cls_label, 0))[0]
+
+                pos_factor, neg_factor = get_sampling_factor(self.num_sample,
+                                                             self.pos_fraction,
+                                                             pos_index.size(0),
+                                                             neg_index.size(0))
+
+                random_index = torch.cat([neg_index[neg_factor], pos_index[pos_factor]])
+                list_cls_label.append(cls_label[random_index])
+                list_reg_label.append(reg_label[random_index])
+                list_proposals.append(proposal[random_index])
+                list_rpn_proposals = list_proposals
+
+        dict_feature = dict(zip([str(i + 1) for i in range(len(list_features))], list_features))
+        # roi pooling - mapping proposal to different features, and uniform output size
+        roi_features = self.roi_pooling(dict_feature, list_rpn_proposals,
+                                        [(image_height, image_width)])
+        # mlp head - flatten roi pooling and input fully connected layer
+        mlp_features = self.mlp_head(roi_features)
+        # predictor - predict class score and reg params.
         predict_cls, predict_reg = self.predictor(mlp_features)
+        predict_reg = predict_reg.view(predict_cls.size(0), -1, 4)
 
-        result = {}
-        losses = {}
+        roi_loss = {}
+        result = []
 
         if self.training:
-            cls_loss, reg_loss = self.compute_loss(predict_cls, predict_reg,
-                                                   list_proposals_label, list_deviation)
-            losses = {
+            cls_label = torch.cat(list_cls_label)
+            reg_label = torch.cat(list_reg_label)
+            # compute cls loss
+            cls_loss = F.cross_entropy(predict_cls, cls_label.long())
+
+            # compute reg loss
+            pos_index = torch.where(torch.gt(cls_label,0))[0]
+            pos_index_label = cls_label[pos_index].long()
+
+            predict_reg = predict_reg[pos_index,pos_index_label]
+            reg_label = reg_label[pos_index]
+            reg_loss = smooth_l1_loss(predict_reg,reg_label)
+            roi_loss = {
                 "cls_loss": cls_loss,
                 "reg_loss": reg_loss
             }
         else:
-            self.post_process(list_proposals, predict_cls, predict_reg)
+            # 1、softMax cls.
+            # 2、assign label for proposal.
+            # 3、regression proposal by reg param.
+            # 4、clip proposal.
+            # 5、remove low score proposal.
+            # 5、remove small proposal.
+            # 6、remove label is '0' proposal.
+            # 7、nms proposal.
+            # 8、select top nms result.
+            num_class = predict_cls.size(-1)
+            # softMax cls
+            predict_score = F.softmax(predict_cls, -1)
+            num_proposals_per_image = [proposal.size(0) for proposal in list_rpn_proposals]
 
-        return result, losses
+            list_predict_score = torch.split(predict_score,num_proposals_per_image)
+            list_predict_reg = torch.split(predict_reg,num_proposals_per_image)
+
+            list_proposal = []
+            list_score = []
+            list_label = []
+            for i in range(len(list_rpn_proposals)):
+                proposal = list_rpn_proposals[i]
+                score = list_predict_score[i]
+                reg = list_predict_reg[i]
+                image_size = list_image_size[i]
+
+                # assign label for proposal
+                label = torch.arange(num_class,device=device)
+                label = label[None:,].expand_as(score)
+
+                # regression proposal by reg param
+                proposal = box_regression(proposal,reg.flatten(1,2)).view(-1,4)
+                # clip proposal
+                proposal = box_clip(proposal, image_size)
+
+                score = score.flatten()
+                label = label.flatten()
+
+                # remove low score proposal
+                index = torch.where(torch.gt(score,self.score_thresh))[0]
+                proposal = proposal[index]
+                score = score[index]
+                label = label[index]
+
+                # remove small proposal
+                _, index = remove_small_box(proposal,self.proposal_min_size)
+                proposal = proposal[index]
+                score = score[index]
+                label = label[index]
+
+                # remove label is '0' proposal
+                index = torch.where(torch.gt(label,0))[0]
+                proposal = proposal[index]
+                score = score[index]
+                label = label[index]
+
+                # nms proposal and select top nms result
+                index = nms(proposal, score, self.nms_threshold)[:self.num_post_nms]
+                proposal = proposal[index]
+                score = score[index]
+                label = label[index]
+
+                list_proposal.append(proposal)
+                list_score.append(score)
+                list_label.append(label)
+
+            for i in range(len(list_proposal)):
+                result.append({
+                    'proposal': list_proposal[i],
+                    'score': list_score[i],
+                    'label': list_label[i]
+                })
+
+        return result, roi_loss
 
 
 if __name__ == '__main__':
 
-    rpn_proposals, targets, feature_maps, images = rpn_test_data()
-    # print([proposal.size() for proposal in rpn_proposals])
-    # print([feature_map.size() for feature_map in feature_maps])
-    # print("**************")
+    batch_image_info = (2, 256, 256)
+    list_rpn_proposals, rpn_loss, list_features = rpn_test_data()
+    list_targets = [
+        {'size': [3.0, 281, 500], 'class': [1.0], 'box': [[104, 78, 375, 183], [133, 88, 197, 123]]},
+        {'size': [3.0, 500.0, 375.0], 'class': [2.0], 'box': [[104, 78, 375, 183]]}
+    ]
 
     params = dict()
-    roi_feature_names = ['1', '2']
+    # default 0.5
+    params['pos_threshold'] = 0.01
+    # default 0.5
+    params['neg_threshold'] = 0.01
+    params['num_sample'] = 512
+    params['pos_fraction'] = 0.25
+    params['regression_weights'] = [10., 10., 5., 5.]
+    params['score_thresh'] = 0.05
+    params['proposal_min_size'] = 1e-3
+    params['nms_threshold'] = 0.5
+    params['num_post_nms'] = 1000
+
+
+    roi_feature_names = [str(i + 1) for i in range(len(list_features))]
     roi_output_size = [7, 7]
     roi_sampling_ratio = 2
     params['roi_pooling'] = ROIPooling(roi_feature_names, roi_output_size, roi_sampling_ratio)
-    representation_size = 1024
-    num_in_pixels = images.size(1) * roi_output_size[0] * roi_output_size[1]
-    params['mlp_head'] = TwoMLPHead(num_in_pixels, representation_size)
-    params['predictor'] = FasterRCNNPredictor(representation_size, 3)
-    params['pos_threshold'] = 0.2
-    params['neg_threshold'] = 0.05
-    params['num_sampling_per_image'] = 512
-    params['pos_fraction'] = 0.25
-    params['regression_weights'] = None
-    roi_head = ROIHead(params)
 
-    roi_head(dict(zip(['1', '2'], feature_maps)), rpn_proposals, targets, [(500, 500)])
+    representation_size = 1024
+    num_channels = 3
+    num_in_pixels = num_channels * roi_output_size[0] * roi_output_size[1]
+    params['mlp_head'] = TwoMLPHead(num_in_pixels, representation_size)
+
+    num_class = 3
+    params['predictor'] = FasterRCNNPredictor(representation_size, num_class)
+
+    roi_head = ROIHead(params)
+    print(roi_head.state_dict().keys())
+    list_image_size = [(267, 226),(289, 271)]
+    result, roi_loss= roi_head(list_rpn_proposals, list_features, batch_image_info, list_targets, list_image_size)
+    print(result)
+    print(roi_loss)

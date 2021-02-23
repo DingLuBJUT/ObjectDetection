@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 """
-Generate anchors for per images.
+Generate anchors for per features.
 
 Description:
     Scaling feature map according to the scale of the original
@@ -19,8 +19,8 @@ from torch.nn import Module
 
 class AnchorGenerator(Module):
     """
-    Generate anchor for feature maps of different sizes of
-    each image, and return anchor list for batch images.
+    Generate anchor for feature maps and return anchor list
+    for batch features.
 
     Args:
         anchor_sizes(tuple): base anchor size.
@@ -94,16 +94,18 @@ class AnchorGenerator(Module):
             anchor_list.append(anchor)
         return anchor_list
 
-    def forward(self, images, feature_maps):
-        batch_size = images.size()[0]
-        image_size = images.size()[2:]
-        feature_sizes = [feature_map.size()[2:] for feature_map in feature_maps]
+    def forward(self, batch_image_info, list_features):
+        batch_size = batch_image_info[0]
+        batch_height = batch_image_info[1]
+        batch_width = batch_image_info[2]
 
-        data_device, data_type = feature_maps[0].device, feature_maps[0].dtype
+        feature_sizes = [feature.size()[2:] for feature in list_features]
+        data_device, data_type = list_features[0].device, list_features[0].dtype
 
         # get stride in every feature map
-        strides = [(torch.as_tensor(image_size[0]/size[0], device=data_device, dtype=data_type),
-                    torch.as_tensor(image_size[1]/size[1], device=data_device, dtype=data_type)) for size in feature_sizes]
+        strides = [(torch.as_tensor(batch_height/size[0], device=data_device, dtype=data_type),
+                    torch.as_tensor(batch_width/size[1], device=data_device, dtype=data_type))
+                    for size in feature_sizes]
 
         # get base anchor
         self.get_base_anchor(data_device, data_type)
@@ -112,18 +114,16 @@ class AnchorGenerator(Module):
         anchor_list_over_features = self.generate_anchor(feature_sizes, strides, data_device, data_type)
 
         # generate anchors for every image
-        anchor_list = []
-        for i in range(batch_size):
-            image_anchor_list = []
-            for feature_anchor in anchor_list_over_features:
-                image_anchor_list.append(feature_anchor)
-            anchor_list.append(torch.cat(image_anchor_list, dim=0))
-        return anchor_list
+        list_anchors = []
+        for anchor in anchor_list_over_features:
+            list_anchors.append(anchor[None,:].expand(batch_size,anchor.size(0),9,4))
+        return list_anchors
 
 
 if __name__ == '__main__':
 
-    images = torch.randn(size=(2, 3, 256, 256))
+    batch_image_info = (2, 256, 256)
     feature_maps = [torch.randn(2, 3, 112, 112), torch.randn(2, 3, 64, 64)]
     anchor_generator = AnchorGenerator()
-    output_anchor_list = anchor_generator(images, feature_maps)
+    list_anchors = anchor_generator(batch_image_info, feature_maps)
+    print([anchor.size() for anchor in list_anchors])
